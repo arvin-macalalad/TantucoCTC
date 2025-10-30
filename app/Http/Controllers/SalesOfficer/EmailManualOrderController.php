@@ -40,7 +40,7 @@ class EmailManualOrderController extends Controller
                     return array_sum(array_column($products, 'qty'));
                 })
                 ->addColumn('delivery_fee', function ($pr) {
-                    return '₱' .$pr->delivery_fee;
+                    return '₱' . $pr->delivery_fee;
                 })
                 ->addColumn('grand_total', function ($pr) {
                     $products = json_decode($pr->purchase_request, true) ?? [];
@@ -72,12 +72,12 @@ class EmailManualOrderController extends Controller
                             'category' => $categoryName ?? 'N/A',
                             'product'  => $productName ?? 'N/A',
                             'qty'      => $p['qty'],
-                            'price'    => $p['price'], 
+                            'price'    => $p['price'],
                         ];
                     }
 
                     $buttons = '<button class="btn btn-sm btn-inverse-primary view-products" 
-                                    data-products=\'' . json_encode($detailedProducts) . '\' data-fee="'.$deliveryFee.'" data-id="'.$requestId.'">
+                                    data-products=\'' . json_encode($detailedProducts) . '\' data-fee="' . $deliveryFee . '" data-id="' . $requestId . '">
                                      <i class="link-icon" data-lucide="eye"></i>
                                 </button> ';
 
@@ -126,7 +126,7 @@ class EmailManualOrderController extends Controller
                             'reason'     => 'sold',
                         ]);
 
-                        StockBatch::reduceFIFO($item['product_id'],  $item['qty'], 'Manual Order (For product id #' .  $item['product_id'] . ')');
+                        StockBatch::reduceFIFO($item['product_id'],  $item['qty'], 'Email Manual Order (For product id #' .  $item['product_id'] . ')');
                     }
                 }
 
@@ -184,7 +184,8 @@ class EmailManualOrderController extends Controller
         ], 200);
     }
 
-    public function delivery_fee(Request $request){
+    public function delivery_fee(Request $request)
+    {
         $validator = Validator::make($request->all(), [
             'manual_order_fee' => 'required',
             'order_id' => 'required'
@@ -197,6 +198,26 @@ class EmailManualOrderController extends Controller
         }
 
         $manualOrder = ManualEmailOrder::findOrFail($request->order_id);
+
+        if ($manualOrder->status == 'approve') {
+
+            $items = json_decode($manualOrder->purchase_request, true);
+
+            if (!empty($items)) {
+                foreach ($items as $item) {
+                    Inventory::create([
+                        'product_id' => $item['product_id'],
+                        'type'       => 'out',
+                        'quantity'   => $item['qty'],
+                        'reason'     => 'sold',
+                    ]);
+
+                    StockBatch::reduceFIFO($item['product_id'],  $item['qty'],'Walk-In Manual Order (For product id #' .  $item['product_id'] . ')');
+                }
+            }
+        }
+
+
         $manualOrder->delivery_fee = $request->manual_order_fee;
         $manualOrder->save();
 
@@ -204,7 +225,5 @@ class EmailManualOrderController extends Controller
             'type' => 'success',
             'message' => 'Delivery successfully updated!',
         ], 200);
-
     }
-
 }

@@ -149,21 +149,6 @@ class WelcomeController extends Controller
             'products.*.qty.required'          => 'Please enter quantity for each product row.',
             'products.*.qty.min'               => 'Quantity must be at least 1 in each product row.',
         ]);
-        // foreach ($validated['products'] as &$product) {
-        //     $dbProduct = Product::find($product['product_id']);
-        //     $product['price'] = ($dbProduct->discounted_price > 0) ? $dbProduct->discounted_price : $dbProduct->price;
-
-        //     // check each purchase remaing stock  verify if this is oaky 
-        //     $availableStock = $product->stockBatches()->sum('remaining_quantity')
-        //         - PrReserveStock::getTotalReservedStock($product->id);
-
-        //     if ($availableStock < $validated['qty']) {
-        //         return response()->json([
-        //             'success' => false,
-        //             'message' => 'Insufficient stock for product: ' . $product->name
-        //         ], 400);
-        //     }
-        // }
 
         foreach ($validated['products'] as &$product) {
             $dbProduct = Product::find($product['product_id']);
@@ -172,14 +157,43 @@ class WelcomeController extends Controller
                 ? $dbProduct->discounted_price
                 : $dbProduct->price;
 
-            // Correct stock check using $dbProduct
-            $availableStock = $dbProduct->stockBatches()->sum('remaining_quantity')
-                - PrReserveStock::getTotalReservedStock($dbProduct->id);
+            // ✅ Get batches with available and non-expired stock
+            $batches = $dbProduct->stockBatches()
+                ->where('remaining_quantity', '>', 0)
+                ->where(function ($q) {
+                    $q->whereNull('expiry_date')
+                        ->orWhere('expiry_date', '>=', now());
+                })
+                ->orderBy('received_date', 'asc')
+                ->get();
 
-            if ($availableStock < $product['qty']) {
+            $requestedQty = (int) $product['qty'];
+
+            $enoughStock = false;
+
+            foreach ($batches as $batch) {
+                $available = (int) $batch->remaining_quantity;
+
+                // ✅ Only check one batch at a time
+                if ($requestedQty <= $available) {
+                    $enoughStock = true;
+                    break; // sufficient stock in this batch
+                } else {
+                    // Not enough in this batch — fail immediately
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Insufficient stock for product: ' . $dbProduct->name .
+                            ' in Batch #' . $batch->batch .
+                            ' (Available: ' . $available . ', Requested: ' . $requestedQty . ')'
+                    ], 400);
+                }
+            }
+
+            // If there are no batches with enough stock
+            if (!$enoughStock) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Insufficient stock for product: ' . $dbProduct->name
+                    'message' => 'No available batch with sufficient stock for product: ' . $dbProduct->name,
                 ], 400);
             }
         }

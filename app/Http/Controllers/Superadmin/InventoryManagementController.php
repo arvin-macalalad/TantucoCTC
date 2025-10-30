@@ -126,6 +126,8 @@ class InventoryManagementController extends Controller
                     $status = '🔴 Depleted';
                 } elseif ($batch->remaining_quantity < $batch->quantity) {
                     $status = '🟡 Partially Sold';
+                } elseif ($batch->expiry_date && Carbon::parse($batch->expiry_date)->isPast()) {
+                    $status = '⚫ Expired';
                 }
 
                 return [
@@ -295,6 +297,13 @@ class InventoryManagementController extends Controller
 
             // ✅ Stock IN: create new batch
             if ($validated['type'] === 'in') {
+
+                $latestBatch = StockBatch::where('product_id', $product->id)
+                ->orderByDesc('batch')
+                ->value('batch');
+
+                $nextBatchNumber = $latestBatch ? $latestBatch + 1 : 1;
+
                 $batch = StockBatch::create([
                     'product_id' => $product->id,
                     'inventory_id' => $inventory->id,
@@ -304,6 +313,7 @@ class InventoryManagementController extends Controller
                     'received_date' => Carbon::now(),
                     'expiry_date' => $validated['expiry_date'],
                     'note' => $validated['reason'] ?? 'Stock added manually',
+                    'batch' => $nextBatchNumber,
                 ]);
 
                 StockMovement::create([

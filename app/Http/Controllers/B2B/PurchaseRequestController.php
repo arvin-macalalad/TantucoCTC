@@ -297,19 +297,135 @@ class PurchaseRequestController extends Controller
         ]);
     }
 
+    // public function submitItem(Request $request)
+    // {
+    //     $user = Auth::user();
+
+    //     // Validate the request
+    //     $request->validate([
+    //         'prids' => 'required|array',
+    //         'prids.*' => 'integer|exists:purchase_requests,id',
+    //         'expected_delivery_date' => 'nullable|date'
+    //     ]);
+
+    //     // Get the purchase requests to check ownership
+    //     $purchaseRequests = PurchaseRequest::with(['items.product']) // include items and products
+    //         ->where('customer_id', $user->id)
+    //         ->whereIn('id', $request->prids)
+    //         ->whereNull('status')
+    //         ->get();
+
+    //     if ($purchaseRequests->isEmpty()) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'No valid purchase requests found to submit.'
+    //         ], 404);
+    //     }
+
+    //     // Pre-check stock availability for all PR items
+    //     foreach ($purchaseRequests as $pr) {
+    //         foreach ($pr->items as $item) {
+    //             $product = $item->product;
+    //             if (!$product) {
+    //                 return response()->json([
+    //                     'success' => false,
+    //                     'message' => 'Product not found for PR item #' . $item->id
+    //                 ], 400);
+    //             }
+
+    //             // ✅ Recalculate price and subtotal dynamically
+    //             $price = $product->discount > 0 && $product->discounted_price
+    //                 ? $product->discounted_price
+    //                 : $product->price;
+
+    //             $item->subtotal = $item->quantity * $price; // ensure latest subtotal is used
+
+    //             // 🔹 Optional: save updated subtotal in DB for data consistency
+    //             // (only if you want to store updated value permanently)
+    //             $item->update(['subtotal' => $item->subtotal]);
+
+    //             // $availableStock = $product->stockBatches()->sum('remaining_quantity');
+
+
+    //             // if ($availableStock < $item->quantity) {
+    //             //     return response()->json([
+    //             //         'success' => false,
+    //             //         'message' => 'Insufficient stock for product: ' . $product->name
+    //             //     ], 400);
+    //             // }
+
+    //             // ✅ Get batches with available and non-expired stock
+    //             $batches = $product->stockBatches()
+    //                 ->where('remaining_quantity', '>', 0)
+    //                 ->where(function ($q) {
+    //                     $q->whereNull('expiry_date')
+    //                         ->orWhere('expiry_date', '>=', now());
+    //                 })
+    //                 ->orderBy('received_date', 'asc')
+    //                 ->get();
+
+    //             $requestedQty = (int) $product['qty'];
+
+    //             $enoughStock = false;
+
+    //             foreach ($batches as $batch) {
+    //                 $available = (int) $batch->remaining_quantity;
+
+    //                 // ✅ Only check one batch at a time
+    //                 if ($requestedQty <= $available) {
+    //                     $enoughStock = true;
+    //                     break; // sufficient stock in this batch
+    //                 } else {
+    //                     // Not enough in this batch — fail immediately
+    //                     return response()->json([
+    //                         'success' => false,
+    //                         'message' => 'Insufficient stock for product: ' . $product->name .
+    //                             ' in Batch #' . $batch->batch .
+    //                             ' (Available: ' . $available . ', Requested: ' . $requestedQty . ')'
+    //                     ], 400);
+    //                 }
+    //             }
+
+    //             // If there are no batches with enough stock
+    //             if (!$enoughStock) {
+    //                 return response()->json([
+    //                     'success' => false,
+    //                     'message' => 'No available batch with sufficient stock for product: ' . $product->name,
+    //                 ], 400);
+    //             }
+    //         }
+    //     }
+
+    //     $updatedCount = PurchaseRequest::whereIn('id', $purchaseRequests->pluck('id'))
+    //         ->update([
+    //             'status' => 'pending',
+    //             'b2b_delivery_date' => $request->expected_delivery_date
+    //         ]);
+
+    //     foreach ($purchaseRequests as $pr) {
+    //         PrReserveStock::reserveForPurchaseRequest($pr);
+    //     }
+
+    //     return response()->json([
+    //         'success' => true,
+    //         'message' => 'Your purchase requests are being processed. Please wait for approval.',
+    //         'data' => [
+    //             'updated_count' => $updatedCount
+    //         ]
+    //     ]);
+    // }
+
     public function submitItem(Request $request)
     {
         $user = Auth::user();
 
-        // Validate the request
         $request->validate([
             'prids' => 'required|array',
             'prids.*' => 'integer|exists:purchase_requests,id',
             'expected_delivery_date' => 'nullable|date'
         ]);
 
-        // Get the purchase requests to check ownership
-        $purchaseRequests = PurchaseRequest::with(['items.product']) // include items and products
+        $purchaseRequests = PurchaseRequest::with(['items.product'])
             ->where('customer_id', $user->id)
             ->whereIn('id', $request->prids)
             ->whereNull('status')
@@ -322,58 +438,96 @@ class PurchaseRequestController extends Controller
             ], 404);
         }
 
-        // Pre-check stock availability for all PR items
-        foreach ($purchaseRequests as $pr) {
-            foreach ($pr->items as $item) {
-                $product = $item->product;
-                if (!$product) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Product not found for PR item #' . $item->id
-                    ], 400);
-                }
+        DB::beginTransaction(); // ✅ Begin transaction
 
-                // ✅ Recalculate price and subtotal dynamically
-                $price = $product->discount > 0 && $product->discounted_price
-                    ? $product->discounted_price
-                    : $product->price;
+        try {
+            // 🔹 Pre-check all stocks before doing any update
+            foreach ($purchaseRequests as $pr) {
+                foreach ($pr->items as $item) {
+                    $product = $item->product;
 
-                $item->subtotal = $item->quantity * $price; // ensure latest subtotal is used
+                    if (!$product) {
+                        DB::rollBack();
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Product not found for PR item #' . $item->id
+                        ], 400);
+                    }
 
-                // 🔹 Optional: save updated subtotal in DB for data consistency
-                // (only if you want to store updated value permanently)
-                $item->update(['subtotal' => $item->subtotal]);
+                    // ✅ Dynamic price calculation
+                    $price = $product->discount > 0 && $product->discounted_price
+                        ? $product->discounted_price
+                        : $product->price;
 
-                $availableStock = $product->stockBatches()->sum('remaining_quantity');
-                
+                    $item->subtotal = $item->quantity * $price;
+                    $item->update(['subtotal' => $item->subtotal]);
 
-                if ($availableStock < $item->quantity) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Insufficient stock for product: ' . $product->name
-                    ], 400);
+                    // ✅ Get only valid batches
+                    $batches = $product->stockBatches()
+                        ->where('remaining_quantity', '>', 0)
+                        ->where(function ($q) {
+                            $q->whereNull('expiry_date')
+                                ->orWhere('expiry_date', '>=', now());
+                        })
+                        ->orderBy('received_date', 'asc')
+                        ->get();
+
+                    $requestedQty = (int) $item->quantity; // ✅ FIXED: use item qty
+                    $remainingToAllocate = $requestedQty;
+
+                    foreach ($batches as $batch) {
+                        if ($remainingToAllocate <= 0) break;
+
+                        $available = (int) $batch->remaining_quantity;
+
+                        if ($available >= $remainingToAllocate) {
+                            // ✅ Batch can fulfill remaining qty
+                            $remainingToAllocate = 0;
+                        } else {
+                            // 🔸 Still not enough — keep checking next batch
+                            $remainingToAllocate -= $available;
+                        }
+                    }
+
+                    // ❌ If after all batches, still not enough stock
+                    if ($remainingToAllocate > 0) {
+                        DB::rollBack(); // ✅ Stop everything
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Insufficient stock for product: ' . $product->name .
+                                ' (Requested: ' . $requestedQty . ')'
+                        ], 400);
+                    }
                 }
             }
-        }
 
-        $updatedCount = PurchaseRequest::whereIn('id', $purchaseRequests->pluck('id'))
-            ->update([
-                'status' => 'pending',
-                'b2b_delivery_date' => $request->expected_delivery_date
+            // ✅ If we reach here, stock is sufficient for all products
+            $updatedCount = PurchaseRequest::whereIn('id', $purchaseRequests->pluck('id'))
+                ->update([
+                    'status' => 'pending',
+                    'b2b_delivery_date' => $request->expected_delivery_date
+                ]);
+
+            foreach ($purchaseRequests as $pr) {
+                PrReserveStock::reserveForPurchaseRequest($pr);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Your purchase requests are being processed. Please wait for approval.',
+                'data' => ['updated_count' => $updatedCount]
             ]);
-
-        foreach ($purchaseRequests as $pr) {
-            PrReserveStock::reserveForPurchaseRequest($pr);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Error occurred: ' . $e->getMessage()
+            ], 500);
         }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Your purchase requests are being processed. Please wait for approval.',
-            'data' => [
-                'updated_count' => $updatedCount
-            ]
-        ]);
     }
+
 
     public function deleteItem($id)
     {

@@ -28,7 +28,21 @@ $(document).ready(function () {
                 data: "customer_address",
                 name: "customer_address",
                 width: "10%",
+                render: function (data, type, row) {
+                    if (!data) return "";
+                    const words = data.split(" ");
+                    const shortAddress =
+                        words.length > 3
+                            ? words.slice(0, 3).join(" ") + "..."
+                            : data;
+                    return `
+                                <span class="address-short text-primary" data-full="${data}" style="cursor:pointer;">
+                                    ${shortAddress}
+                                </span>
+                            `;
+                },
             },
+
             {
                 data: "phone_number",
                 name: "phone_number",
@@ -68,7 +82,7 @@ $(document).ready(function () {
         },
     });
 
-    table.on('draw.dt responsive-display responsive-resize', function () {
+    table.on("draw.dt responsive-display responsive-resize", function () {
         if (typeof lucide !== "undefined") {
             lucide.createIcons();
         }
@@ -99,7 +113,7 @@ $(document).ready(function () {
                     "/salesofficer/manual-email-order/approve",
                     {
                         id: id,
-                        type: 'approve'
+                        type: "approve",
                     },
                     function (response) {
                         Swal.fire("Approved!", response.message, "success");
@@ -137,7 +151,7 @@ $(document).ready(function () {
                     "/salesofficer/manual-email-order/approve",
                     {
                         id: id,
-                        type: 'reject'
+                        type: "reject",
                     },
                     function (response) {
                         Swal.fire("Rejected!", response.message, "success");
@@ -159,16 +173,16 @@ $(document).ready(function () {
         let requestId = $(this).attr("data-id");
 
         if (deliveryFee == 0) {
-            $('#manualOrderFeebtn').removeClass('d-none');
-            $('#manualOrderFeebtn').text('Add Delivery Fee');
-            $('#manualOrderFeebtn').attr('data-id', requestId);
+            $("#manualOrderFeebtn").removeClass("d-none");
+            $("#manualOrderFeebtn").text("Add Delivery Fee");
+            $("#manualOrderFeebtn").attr("data-id", requestId);
         } else if (deliveryFee > 0) {
-            $('#manualOrderFeebtn').removeClass('d-none');
-            $('#manualOrderFeebtn').text('Edit Delivery Fee');
-            $('#manualOrderFeebtn').attr('data-id', requestId);
+            $("#manualOrderFeebtn").removeClass("d-none");
+            $("#manualOrderFeebtn").text("Edit Delivery Fee");
+            $("#manualOrderFeebtn").attr("data-id", requestId);
         } else {
-            $('#manualOrderFeebtn').addClass('d-none');
-            $('#manualOrderFeebtn').removeAttr('data-id');
+            $("#manualOrderFeebtn").addClass("d-none");
+            $("#manualOrderFeebtn").removeAttr("data-id");
         }
 
         let totalQty = 0;
@@ -226,7 +240,9 @@ $(document).ready(function () {
                     <th class="text-end">₱${vatAmount.toFixed(2)}</th>
                 </tr>
                 <tr>
-                    <th colspan="3" class="text-end">Delivery Fee <br> <i style="font-size:12px;">${deliveryFee == 0 ? 'No delivery fee' : ''}<i></th>
+                    <th colspan="3" class="text-end">Delivery Fee <br> <i style="font-size:12px;">${
+                        deliveryFee == 0 ? "No delivery fee" : ""
+                    }<i></th>
                     <th class="text-end">₱${deliveryFee.toFixed(2)}</th>
                 </tr>
                 <tr>
@@ -290,11 +306,11 @@ $(document).ready(function () {
     });
 
     $(document).on("click", "#manualOrderFeebtn", function () {
-        const id = $(this).attr('data-id');
+        const id = $(this).attr("data-id");
         $(".modal-title").text("Manual Order Delivery Fee");
         $("#deliveryFeeModal").modal("show");
         $("#deliveryFeeForm")[0].reset();
-        $("#deliveryFeeForm").attr('data-rid', id);
+        $("#deliveryFeeForm").attr("data-rid", id);
         $("#viewProductModal").modal("hide");
     });
 
@@ -313,8 +329,8 @@ $(document).ready(function () {
         let formData = new FormData(form);
 
         // Append order_id from data-rid attribute
-        let orderId = $(form).attr('data-rid');
-        formData.append('order_id', orderId);
+        let orderId = $(form).attr("data-rid");
+        formData.append("order_id", orderId);
 
         $("#deliveryFeebtn").prop("disabled", true);
 
@@ -348,8 +364,14 @@ $(document).ready(function () {
         });
     });
 
-    
+    $(document).on("click", ".address-short", function () {
+        const fullAddress = $(this).data("full");
 
-
-    
+        Swal.fire({
+            title: "Full Customer Address",
+            text: fullAddress,
+            icon: "info",
+            confirmButtonText: "Close",
+        });
+    });
 });

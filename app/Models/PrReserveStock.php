@@ -74,47 +74,47 @@ class PrReserveStock extends Model
             });
         }
     } */
-       public static function reserveForPurchaseRequest(PurchaseRequest $purchaseRequest)
-        {
-            foreach ($purchaseRequest->items as $item) {
-                $product = $item->product;
+    public static function reserveForPurchaseRequest(PurchaseRequest $purchaseRequest)
+    {
+        foreach ($purchaseRequest->items as $item) {
+            $product = $item->product;
 
-                if (!$product) {
-                    throw new \Exception('Product not found for PR item #' . $item->id);
-                }
-
-                // Use stock batches for accurate stock
-                $availableStock = $product->stockBatches()->sum('remaining_quantity');
-
-                if ($availableStock < $item->quantity) {
-                    throw new \Exception('Insufficient stock for product: ' . $product->name);
-                }
-
-
-                DB::transaction(function () use ($purchaseRequest, $product, $item) {
-
-
-                    // 1️⃣ Create reserve record as pending
-                    $reserve = self::create([
-                        'pr_id' => $purchaseRequest->id,
-                        'product_id' => $product->id,
-                        'qty' => $item->quantity,
-                        'status' => 'pending', // still pending
-                    ]);
-
-                    // 2️⃣ Deduct stock immediately (even if pending)
-                    StockBatch::reduceFIFO($product->id, $item->quantity, 'Reserved (Pending PR#' . $purchaseRequest->id . ')');
-
-                    // 3️⃣ Log inventory as out (reserved)
-                    Inventory::create([
-                        'product_id' => $product->id,
-                        'type' => 'out',
-                        'quantity' => $item->quantity,
-                        'reason' => 'reserved (pending)',
-                    ]);
-                });
+            if (!$product) {
+                throw new \Exception('Product not found for PR item #' . $item->id);
             }
+
+            // Use stock batches for accurate stock
+            $availableStock = $product->stockBatches()->sum('remaining_quantity');
+
+            if ($availableStock < $item->quantity) {
+                throw new \Exception('Insufficient stock for product: ' . $product->name);
+            }
+
+
+            DB::transaction(function () use ($purchaseRequest, $product, $item) {
+
+
+                // 1️⃣ Create reserve record as pending
+                $reserve = self::create([
+                    'pr_id' => $purchaseRequest->id,
+                    'product_id' => $product->id,
+                    'qty' => $item->quantity,
+                    'status' => 'pending', // still pending
+                ]);
+
+                // 2️⃣ Deduct stock immediately (even if pending)
+                StockBatch::reduceFIFO($product->id, $item->quantity, 'Reserved (Pending PR#' . $purchaseRequest->id . ')');
+
+                // 3️⃣ Log inventory as out (reserved)
+                Inventory::create([
+                    'product_id' => $product->id,
+                    'type' => 'out',
+                    'quantity' => $item->quantity,
+                    'reason' => 'reserved (pending)',
+                ]);
+            });
         }
+    }
 
 
     /**
@@ -153,7 +153,7 @@ class PrReserveStock extends Model
         }
     }
     */
-        public static function approveReservation($prId)
+    public static function approveReservation($prId)
     {
         $reserves = self::where('pr_id', $prId)
             ->where('status', 'pending')

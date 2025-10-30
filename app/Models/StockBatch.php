@@ -23,6 +23,7 @@ class StockBatch extends Model
         'cost_price',
         'received_date',
         'expiry_date',
+        'batch',
         'note'
     ];
 
